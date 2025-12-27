@@ -1836,6 +1836,88 @@ SherpaOnnxOfflineSpeechDenoiserRun(const SherpaOnnxOfflineSpeechDenoiser *sd,
 SHERPA_ONNX_API void SherpaOnnxDestroyDenoisedAudio(
     const SherpaOnnxDenoisedAudio *p);
 
+// ============================================================
+// Offline Source Separation (Spleeter/UVR)
+// ============================================================
+
+SHERPA_ONNX_API typedef struct SherpaOnnxOfflineSourceSeparationSpleeterModelConfig {
+  const char *vocals;
+  const char *accompaniment;
+} SherpaOnnxOfflineSourceSeparationSpleeterModelConfig;
+
+SHERPA_ONNX_API typedef struct SherpaOnnxOfflineSourceSeparationUvrModelConfig {
+  const char *model;
+} SherpaOnnxOfflineSourceSeparationUvrModelConfig;
+
+SHERPA_ONNX_API typedef struct SherpaOnnxOfflineSourceSeparationModelConfig {
+  SherpaOnnxOfflineSourceSeparationSpleeterModelConfig spleeter;
+  SherpaOnnxOfflineSourceSeparationUvrModelConfig uvr;
+  int32_t num_threads;
+  int32_t debug;
+  const char *provider;
+} SherpaOnnxOfflineSourceSeparationModelConfig;
+
+SHERPA_ONNX_API typedef struct SherpaOnnxOfflineSourceSeparationConfig {
+  SherpaOnnxOfflineSourceSeparationModelConfig model;
+} SherpaOnnxOfflineSourceSeparationConfig;
+
+SHERPA_ONNX_API typedef struct SherpaOnnxOfflineSourceSeparation
+    SherpaOnnxOfflineSourceSeparation;
+
+SHERPA_ONNX_API typedef struct SherpaOnnxSeparatedAudio {
+  const float *samples;
+  int32_t n;
+  int32_t sample_rate;
+  int32_t num_channels;
+} SherpaOnnxSeparatedAudio;
+
+SHERPA_ONNX_API typedef struct SherpaOnnxOfflineSourceSeparationResult {
+  const SherpaOnnxSeparatedAudio *stems;
+  int32_t num_stems;
+} SherpaOnnxOfflineSourceSeparationResult;
+
+// Create an offline source separation instance.
+// The user has to invoke SherpaOnnxDestroyOfflineSourceSeparation()
+// to free the returned pointer to avoid memory leak.
+SHERPA_ONNX_API const SherpaOnnxOfflineSourceSeparation *
+SherpaOnnxCreateOfflineSourceSeparation(
+    const SherpaOnnxOfflineSourceSeparationConfig *config);
+
+// Free the pointer returned by SherpaOnnxCreateOfflineSourceSeparation()
+SHERPA_ONNX_API void SherpaOnnxDestroyOfflineSourceSeparation(
+    const SherpaOnnxOfflineSourceSeparation *ss);
+
+// Get the expected output sample rate of the source separation model.
+SHERPA_ONNX_API int32_t SherpaOnnxOfflineSourceSeparationGetSampleRate(
+    const SherpaOnnxOfflineSourceSeparation *ss);
+
+// Get the number of stems produced by the source separation model.
+// e.g., 2 for vocals + accompaniment
+SHERPA_ONNX_API int32_t SherpaOnnxOfflineSourceSeparationGetNumStems(
+    const SherpaOnnxOfflineSourceSeparation *ss);
+
+// Run source separation on input samples.
+// @param ss  The source separation instance
+// @param samples  Interleaved audio samples in the range [-1, 1].
+//                 For stereo: [L0, R0, L1, R1, ...]
+// @param n  Total number of float values (num_samples * num_channels)
+// @param sample_rate  Sample rate of the input audio
+// @param num_channels  Number of audio channels (1 for mono, 2 for stereo)
+//
+// The user MUST use SherpaOnnxDestroyOfflineSourceSeparationResult()
+// to free the returned pointer to avoid memory leak.
+SHERPA_ONNX_API const SherpaOnnxOfflineSourceSeparationResult *
+SherpaOnnxOfflineSourceSeparationProcess(
+    const SherpaOnnxOfflineSourceSeparation *ss,
+    const float *samples,
+    int32_t n,
+    int32_t sample_rate,
+    int32_t num_channels);
+
+// Free the result returned by SherpaOnnxOfflineSourceSeparationProcess()
+SHERPA_ONNX_API void SherpaOnnxDestroyOfflineSourceSeparationResult(
+    const SherpaOnnxOfflineSourceSeparationResult *r);
+
 #ifdef __OHOS__
 
 // It is for HarmonyOS

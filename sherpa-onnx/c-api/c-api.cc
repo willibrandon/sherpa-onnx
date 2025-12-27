@@ -24,6 +24,7 @@
 #include "sherpa-onnx/csrc/macros.h"
 #include "sherpa-onnx/csrc/offline-punctuation.h"
 #include "sherpa-onnx/csrc/offline-recognizer.h"
+#include "sherpa-onnx/csrc/offline-source-separation.h"
 #include "sherpa-onnx/csrc/offline-speech-denoiser.h"
 #include "sherpa-onnx/csrc/online-punctuation.h"
 #include "sherpa-onnx/csrc/online-recognizer.h"
@@ -2201,6 +2202,139 @@ const SherpaOnnxDenoisedAudio *SherpaOnnxOfflineSpeechDenoiserRun(
 void SherpaOnnxDestroyDenoisedAudio(const SherpaOnnxDenoisedAudio *p) {
   delete[] p->samples;
   delete p;
+}
+
+// ============================================================
+// Offline Source Separation
+// ============================================================
+
+struct SherpaOnnxOfflineSourceSeparation {
+  std::unique_ptr<sherpa_onnx::OfflineSourceSeparation> impl;
+};
+
+struct SherpaOnnxOfflineSourceSeparationResultWrapper {
+  SherpaOnnxOfflineSourceSeparationResult result;
+  std::vector<SherpaOnnxSeparatedAudio> stems_array;
+  std::vector<std::vector<float>> samples_storage;
+};
+
+static sherpa_onnx::OfflineSourceSeparationConfig
+GetOfflineSourceSeparationConfig(
+    const SherpaOnnxOfflineSourceSeparationConfig *config) {
+  sherpa_onnx::OfflineSourceSeparationConfig c;
+
+  c.model.spleeter.vocals = SHERPA_ONNX_OR(config->model.spleeter.vocals, "");
+  c.model.spleeter.accompaniment =
+      SHERPA_ONNX_OR(config->model.spleeter.accompaniment, "");
+  c.model.uvr.model = SHERPA_ONNX_OR(config->model.uvr.model, "");
+  c.model.num_threads = SHERPA_ONNX_OR(config->model.num_threads, 1);
+  c.model.debug = config->model.debug;
+  c.model.provider = SHERPA_ONNX_OR(config->model.provider, "cpu");
+
+  if (c.model.debug) {
+#if __OHOS__
+    SHERPA_ONNX_LOGE("%{public}s\n", c.ToString().c_str());
+#else
+    SHERPA_ONNX_LOGE("%s\n", c.ToString().c_str());
+#endif
+  }
+
+  return c;
+}
+
+const SherpaOnnxOfflineSourceSeparation *SherpaOnnxCreateOfflineSourceSeparation(
+    const SherpaOnnxOfflineSourceSeparationConfig *config) {
+  auto ss_config = GetOfflineSourceSeparationConfig(config);
+
+  if (!ss_config.Validate()) {
+    SHERPA_ONNX_LOGE("Errors in config");
+    return nullptr;
+  }
+
+  SherpaOnnxOfflineSourceSeparation *ss = new SherpaOnnxOfflineSourceSeparation;
+  ss->impl = std::make_unique<sherpa_onnx::OfflineSourceSeparation>(ss_config);
+
+  return ss;
+}
+
+void SherpaOnnxDestroyOfflineSourceSeparation(
+    const SherpaOnnxOfflineSourceSeparation *ss) {
+  delete ss;
+}
+
+int32_t SherpaOnnxOfflineSourceSeparationGetSampleRate(
+    const SherpaOnnxOfflineSourceSeparation *ss) {
+  return ss->impl->GetOutputSampleRate();
+}
+
+int32_t SherpaOnnxOfflineSourceSeparationGetNumStems(
+    const SherpaOnnxOfflineSourceSeparation *ss) {
+  return ss->impl->GetNumberOfStems();
+}
+
+const SherpaOnnxOfflineSourceSeparationResult *
+SherpaOnnxOfflineSourceSeparationProcess(
+    const SherpaOnnxOfflineSourceSeparation *ss,
+    const float *samples,
+    int32_t n,
+    int32_t sample_rate,
+    int32_t num_channels) {
+  sherpa_onnx::OfflineSourceSeparationInput input;
+  input.sample_rate = sample_rate;
+
+  int32_t num_samples = n / num_channels;
+  input.samples.data.resize(num_channels);
+  for (int32_t c = 0; c < num_channels; ++c) {
+    input.samples.data[c].resize(num_samples);
+  }
+
+  for (int32_t i = 0; i < num_samples; ++i) {
+    for (int32_t c = 0; c < num_channels; ++c) {
+      input.samples.data[c][i] = samples[i * num_channels + c];
+    }
+  }
+
+  auto output = ss->impl->Process(input);
+
+  auto *wrapper = new SherpaOnnxOfflineSourceSeparationResultWrapper;
+  int32_t num_stems = static_cast<int32_t>(output.stems.size());
+
+  wrapper->stems_array.resize(num_stems);
+  wrapper->samples_storage.resize(num_stems);
+
+  for (int32_t s = 0; s < num_stems; ++s) {
+    const auto &stem = output.stems[s];
+    int32_t stem_channels = static_cast<int32_t>(stem.data.size());
+    int32_t stem_samples = stem_channels > 0
+        ? static_cast<int32_t>(stem.data[0].size())
+        : 0;
+
+    wrapper->samples_storage[s].resize(stem_samples * stem_channels);
+    for (int32_t i = 0; i < stem_samples; ++i) {
+      for (int32_t c = 0; c < stem_channels; ++c) {
+        wrapper->samples_storage[s][i * stem_channels + c] = stem.data[c][i];
+      }
+    }
+
+    wrapper->stems_array[s].samples = wrapper->samples_storage[s].data();
+    wrapper->stems_array[s].n =
+        static_cast<int32_t>(wrapper->samples_storage[s].size());
+    wrapper->stems_array[s].sample_rate = output.sample_rate;
+    wrapper->stems_array[s].num_channels = stem_channels;
+  }
+
+  wrapper->result.stems = wrapper->stems_array.data();
+  wrapper->result.num_stems = num_stems;
+
+  return &wrapper->result;
+}
+
+void SherpaOnnxDestroyOfflineSourceSeparationResult(
+    const SherpaOnnxOfflineSourceSeparationResult *r) {
+  auto *wrapper = reinterpret_cast<const SherpaOnnxOfflineSourceSeparationResultWrapper *>(
+      reinterpret_cast<const char *>(r) -
+      offsetof(SherpaOnnxOfflineSourceSeparationResultWrapper, result));
+  delete wrapper;
 }
 
 #if SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION == 1
